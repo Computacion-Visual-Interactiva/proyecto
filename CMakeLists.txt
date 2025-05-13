@@ -13,10 +13,14 @@ set(INCLUDE
 set(SHADERS
     assets/cube.vsh
     assets/cube.psh
+    assets/DepthGrid.hlsl
 )
 
 set(ASSETS
     assets/DGLogo.png
+    assets/try.png
+    assets/hdrHigh.png
+    assets/depth.png
 )
 
 add_sample_app("Tutorial03_Texturing" "DiligentSamples/Tutorials" "${SOURCE}" "${INCLUDE}" "${SHADERS}" "${ASSETS}")

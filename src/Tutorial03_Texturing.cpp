@@ -26,7 +26,10 @@
  */
 
 #include "Tutorial03_Texturing.hpp"
+#include "butterfly_verts.hpp"
 #include "MapHelper.hpp"
+#include "FirstPersonCamera.hpp"
+#include "StringTools.hpp"
 #include "GraphicsUtilities.h"
 #include "TextureUtilities.h"
 #include "ColorConversion.h"
@@ -99,7 +102,13 @@ void Tutorial03_Texturing::CreatePipelineState()
         m_pDevice->CreateShader(ShaderCI, &pVS);
         // Create dynamic uniform buffer that will store our transformation matrix
         // Dynamic buffers can be frequently updated by the CPU
-        CreateUniformBuffer(m_pDevice, sizeof(float4x4), "VS constants CB", &m_VSConstants);
+        BufferDesc CBDesc;
+        CBDesc.Name           = "VS constants";
+        CBDesc.Size           = sizeof(float4x4);
+        CBDesc.Usage          = USAGE_DYNAMIC;
+        CBDesc.BindFlags      = BIND_UNIFORM_BUFFER;
+        CBDesc.CPUAccessFlags = CPU_ACCESS_WRITE;
+        m_pDevice->CreateBuffer(CBDesc, nullptr, &m_VSConstants);
     }
 
     // Create a pixel shader
@@ -170,226 +179,105 @@ void Tutorial03_Texturing::CreatePipelineState()
     m_pPSO->CreateShaderResourceBinding(&m_SRB, true);
 }
 
+// call this from Initialize()  **after** SampleBase::Initialize()
+void Tutorial03_Texturing::CreateSkySphere()
+{
+    // ------------------ constant buffer (inverse VP) ---------------------
+    BufferDesc cbd;
+    cbd.Name           = "SkySphere CB";
+    cbd.Size           = sizeof(float4x4);
+    cbd.BindFlags      = BIND_UNIFORM_BUFFER;
+    cbd.Usage          = USAGE_DYNAMIC;
+    cbd.CPUAccessFlags = CPU_ACCESS_WRITE;
+    m_pDevice->CreateBuffer(cbd, nullptr, &m_SkyCB); // new member!
+
+    // ------------------ load equirectangular PNG -------------------------
+    TextureLoadInfo tli{};
+    tli.IsSRGB = true;
+    RefCntAutoPtr<ITexture> SkyTex;
+    CreateTextureFromFile("hdrHigh.png", tli,
+                          m_pDevice, &SkyTex);
+    m_SkySRV = SkyTex->GetDefaultView(TEXTURE_VIEW_SHADER_RESOURCE);
+
+    // ------------------------- PSO ---------------------------------------
+    GraphicsPipelineStateCreateInfo ci;
+    ci.PSODesc.Name         = "SkySphere PSO";
+    ci.PSODesc.PipelineType = PIPELINE_TYPE_GRAPHICS;
+
+    const auto& sc                                   = m_pSwapChain->GetDesc();
+    ci.GraphicsPipeline.NumRenderTargets             = 1;
+    ci.GraphicsPipeline.RTVFormats[0]                = sc.ColorBufferFormat;
+    ci.GraphicsPipeline.DSVFormat                    = sc.DepthBufferFormat;
+    ci.GraphicsPipeline.PrimitiveTopology            = PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+    ci.GraphicsPipeline.RasterizerDesc.CullMode      = CULL_MODE_NONE;
+    ci.GraphicsPipeline.DepthStencilDesc.DepthEnable = False;
+
+    // compile shaders
+    ShaderCreateInfo si;
+    si.SourceLanguage = SHADER_SOURCE_LANGUAGE_HLSL;
+    m_pEngineFactory->CreateDefaultShaderSourceStreamFactory(nullptr,
+                                                             &si.pShaderSourceStreamFactory);
+
+    RefCntAutoPtr<IShader> vs, ps;
+    si.Desc       = {"Sky VS", SHADER_TYPE_VERTEX, true};
+    si.EntryPoint = "VSMain";
+    si.FilePath   = "DepthGrid.hlsl";
+    m_pDevice->CreateShader(si, &vs);
+
+    si.Desc       = {"Sky PS", SHADER_TYPE_PIXEL, true};
+    si.EntryPoint = "PSMain";
+    m_pDevice->CreateShader(si, &ps);
+
+    ci.pVS = vs;
+    ci.pPS = ps;
+
+    // pipeline resources
+    ShaderResourceVariableDesc vars[] =
+        {
+            {SHADER_TYPE_PIXEL, "g_SkyTex", SHADER_RESOURCE_VARIABLE_TYPE_MUTABLE}};
+    ci.PSODesc.ResourceLayout.Variables    = vars;
+    ci.PSODesc.ResourceLayout.NumVariables = _countof(vars);
+
+    SamplerDesc          samp{FILTER_TYPE_LINEAR, FILTER_TYPE_LINEAR, FILTER_TYPE_LINEAR,
+                     TEXTURE_ADDRESS_CLAMP, TEXTURE_ADDRESS_CLAMP, TEXTURE_ADDRESS_CLAMP};
+    ImmutableSamplerDesc ims[] =
+        {
+            {SHADER_TYPE_PIXEL, "g_SkyTex", samp}};
+    ci.PSODesc.ResourceLayout.ImmutableSamplers    = ims;
+    ci.PSODesc.ResourceLayout.NumImmutableSamplers = _countof(ims);
+
+    m_pDevice->CreateGraphicsPipelineState(ci, &m_SkyPSO);
+    m_SkyPSO->GetStaticVariableByName(SHADER_TYPE_VERTEX, "CB")->Set(m_SkyCB);
+    m_SkyPSO->CreateShaderResourceBinding(&m_SkySRB, true);
+    m_SkySRB->GetVariableByName(SHADER_TYPE_PIXEL, "g_SkyTex")->Set(m_SkySRV);
+}
+
+
+
+
 void Tutorial03_Texturing::CreateVertexBuffer()
 {
-    struct Vertex
-    {
-        float3 pos;
-        float2 uv;
-    };
-
-    constexpr Vertex ButterflyVerts[] =
-        {
-            // Wing left upper
-            {float3{6.45f, 3.6f, 0}, float2{0, 1}},     // Vertex 0 centro
-            {float3{6.45f, 5.4f, 0}, float2{0, 1}},     // Vertex 1
-            {float3{9.2f, 5.35f, 0}, float2{0, 1}},     // Vertex 2
-            {float3{8.8f, 4.3f, 0}, float2{0, 1}},      // Vertex 3
-            {float3{8.35f, 3.4f, 0}, float2{0, 1}},     // Vertex 4
-            {float3{7.7f, 2.58f, 0}, float2{0, 1}},     // Vertex 5
-            {float3{7.13f, 2.0f, 0}, float2{0, 1}},     // Vertex 6
-            {float3{5.95f, 1.12f, 0}, float2{0, 1}},    // Vertex 7
-            {float3{4.45f, 0.9f, 0}, float2{0, 1}},     // Vertex 8
-            {float3{4.3f, 1.8f, 0}, float2{0, 1}},      // Vertex 9 
-            {float3{4.31f, 2.55f, 0}, float2{0, 1}},    // Vertex 10
-            {float3{4.20f, 3.3f, 0}, float2{0, 1}},     // Vertex 11
-            {float3{4.07f, 3.65f, 0}, float2{0, 1}},    // Vertex 12
-            {float3{4.15f, 4.05f, 0}, float2{0, 1}},    // Vertex 13
-            {float3{4.2f, 4.6f, 0}, float2{0, 1}},      // Vertex 14
-            {float3{4.55f, 5.1f, 0}, float2{0, 1}},     // Vertex 15
-            {float3{6.0f, 5.4f, 0}, float2{0, 1}},      // Vertex 16
-
-            // Wing left down
-            {float3{7.1f, 7.0f, 0}, float2{0, 1}},      // Vertex 17 centro
-            {float3{6.65f, 5.38f, 0}, float2{0, 1}},    // Vertex 18
-            {float3{9.25f, 5.4f, 0}, float2{0, 1}},     // Vertex 19
-            {float3{9.24f, 6.12f, 0}, float2{0, 1}},   // Vertex 20
-            {float3{9.3f, 6.8f, 0}, float2{0, 1}},      // Vertex 21
-            {float3{9.15f, 7.2f, 0}, float2{0, 1}},     // Vertex 22
-            {float3{8.86f, 7.75f, 0}, float2{0, 1}},    // Vertex 23
-            {float3{8.17f, 8.4f, 0}, float2{0, 1}},     // Vertex 24
-            {float3{7.88f, 8.88f, 0}, float2{0, 1}},   // Vertex 25
-            {float3{7.7f, 9.15f, 0}, float2{0, 1}},     // Vertex 26
-            {float3{6.62f, 9.86f, 0}, float2{0, 1}},   // Vertex 27
-            {float3{5.9f, 9.61f, 0}, float2{0, 1}},     // Vertex 28
-            {float3{5.72f, 9.2f, 0}, float2{0, 1}},     // Vertex 29
-            {float3{5.16f, 8.73f, 0}, float2{0, 1}},   // Vertex 30
-            {float3{4.95f, 8.3f, 0}, float2{0, 1}},   // Vertex 31
-            {float3{4.72f, 8.1f, 0}, float2{0, 1}},   // Vertex 32
-            {float3{4.68f, 7.7f, 0}, float2{0, 1}},   // Vertex 33
-            {float3{4.45f, 7.3f, 0}, float2{0, 1}},   // Vertex 34
-            {float3{4.5f, 6.4f, 0}, float2{0, 1}},   // Vertex 35
-            {float3{4.65f, 6.5f, 0}, float2{0, 1}},   // Vertex 36
-
-            // Antler Left
-            {float3{8.72f, 3.27f, 0}, float2{0, 1}}, // Vertex 37 centro
-            {float3{8.65f, 3.3f, 0}, float2{0, 1}},   // Vertex 38
-            {float3{9.45f, 4.7f, 0}, float2{0, 1}},   // Vertex 39
-
-            // Antler Right
-            {float3{10.23f, 3.19f, 0}, float2{0, 1}}, // Vertex 40 centro
-            {float3{10.3f, 3.28f, 0}, float2{0, 1}},   // Vertex 41
-            {float3{9.57f, 4.7f, 0}, float2{0, 1}},   // Vertex 42
-
-            // head
-            {float3{9.47f, 4.9f, 0}, float2{0, 1}}, // Vertex 43 centro
-            {float3{9.37f, 5.08f, 0}, float2{0, 1}}, // Vertex 44
-            {float3{9.62f, 5.1f, 0}, float2{0, 1}},   // Vertex 45
-            {float3{9.7f, 4.9f, 0}, float2{0, 1}},   // Vertex 46
-            {float3{9.65f, 4.72f, 0}, float2{0, 1}},   // Vertex 47
-            {float3{9.45f, 4.7f, 0}, float2{0, 1}},   // Vertex 48
-            {float3{9.25f, 4.78f, 0}, float2{0, 1}},   // Vertex 49
-            {float3{9.24f, 4.9f, 0}, float2{0, 1}},   // Vertex 50
-
-            // Body
-            {float3{9.55f, 7.12f, 0}, float2{0, 1}}, // Vertex 51
-            {float3{9.39f, 7.04f, 0}, float2{0, 1}},   // Vertex 52
-            {float3{9.65f, 7.0f, 0}, float2{0, 1}},   // Vertex 53
-            {float3{9.72f, 6.8f, 0}, float2{0, 1}},   // Vertex 54
-            {float3{9.3f, 6.71f, 0}, float2{0, 1}},  // Vertex 55
-            {float3{9.74f, 6.4f, 0}, float2{0, 1}},   // Vertex 56
-            {float3{9.23f, 5.92f, 0}, float2{0, 1}},   // Vertex 57
-            {float3{9.69f, 5.74f, 0}, float2{0, 1}},   // Vertex 58
-            {float3{9.25f, 5.4f, 0}, float2{0, 1}},  // Vertex 59
-            {float3{9.7f, 5.25f, 0}, float2{0, 1}},   // Vertex 60
-            {float3{9.37f, 5.08f, 0}, float2{0, 1}},  // Vertex 61
-            {float3{9.63f, 5.1f, 0}, float2{0, 1}},  // Vertex 62
-
-            // Wing right upper
-            {float3{12.65f, 3.8f, 0}, float2{0, 1}}, // Vertex 63 centro
-            {float3{9.7f, 5.4f, 0}, float2{0, 1}}, // Vertex 64
-            {float3{13.19f, 5.58f, 0}, float2{0, 1}},   // Vertex 65
-            {float3{14.08f, 5.6f, 0}, float2{0, 1}}, // Vertex 66
-            {float3{14.65f, 5.25f, 0}, float2{0, 1}},   // Vertex 67
-            {float3{14.88f, 5.1f, 0}, float2{0, 1}},   // Vertex 68
-            {float3{14.92f, 4.47f, 0}, float2{0, 1}},   // Vertex 69
-            {float3{15.03f, 4.29f, 0}, float2{0, 1}},   // Vertex 70
-            {float3{14.95f, 3.8f, 0}, float2{0, 1}},   // Vertex 71
-            {float3{14.96f, 3.15f, 0}, float2{0, 1}},   // Vertex 72
-            {float3{15.03f, 2.23f, 0}, float2{0, 1}},   // Vertex 73
-            {float3{14.97f, 1.27f, 0}, float2{0, 1}},   // Vertex 74
-            {float3{14.52f, 1.15f, 0}, float2{0, 1}},   // Vertex 75
-            {float3{13.95f, 1.28f, 0}, float2{0, 1}},   // Vertex 76
-            {float3{13.07f, 1.65f, 0}, float2{0, 1}},   // Vertex 77
-            {float3{12.3f, 2.05f, 0}, float2{0, 1}},   // Vertex 78
-            {float3{11.45f, 2.8f, 0}, float2{0, 1}},   // Vertex 79
-            {float3{10.77f, 3.56f, 0}, float2{0, 1}},   // Vertex 80
-            {float3{10.17f, 4.28f, 0}, float2{0, 1}},   // Vertex 81
-
-            // Wing right down
-            {float3{12.02f, 7.05f, 0}, float2{0, 1}}, // Vertex 82 centro
-            {float3{9.68f, 5.4f, 0}, float2{0, 1}},  // Vertex 83
-            {float3{13.16f, 5.67f, 0}, float2{0, 1}},  // Vertex 84
-            {float3{14.25f, 6.3f, 0}, float2{0, 1}},  // Vertex 85
-            {float3{14.48f, 6.75f, 0}, float2{0, 1}},  // Vertex 86
-            {float3{14.48f, 7.28f, 0}, float2{0, 1}},   // Vertex 87
-            {float3{14.26f, 7.75f, 0}, float2{0, 1}},   // Vertex 88
-            {float3{14.18f, 8.18f, 0}, float2{0, 1}},  // Vertex 89
-            {float3{13.95f, 8.32f, 0}, float2{0, 1}},  // Vertex 90
-            {float3{13.85f, 8.7f, 0}, float2{0, 1}},   // Vertex 91
-            {float3{13.5f, 8.88f, 0}, float2{0, 1}},  // Vertex 92
-            {float3{13.25f, 9.15f, 0}, float2{0, 1}},  // Vertex 93
-            {float3{13.15f, 9.61f, 0}, float2{0, 1}},   // Vertex 94
-            {float3{12.82f, 9.62f, 0}, float2{0, 1}},  // Vertex 95
-            {float3{12.47f, 9.85f, 0}, float2{0, 1}},   // Vertex 96
-            {float3{12.1f, 9.8f, 0}, float2{0, 1}},  // Vertex 97
-            {float3{11.58f, 9.52f, 0}, float2{0, 1}},   // Vertex 98
-            {float3{11.17f, 8.86f, 0}, float2{0, 1}},  // Vertex 99
-            {float3{10.78f, 8.25f, 0}, float2{0, 1}}, // Vertex 100
-            {float3{10.0f, 7.45f, 0}, float2{0, 1}},   // Vertex 101
-            {float3{9.82f, 6.9f, 0}, float2{0, 1}},  // Vertex 102
-            {float3{9.74f, 6.4f, 0}, float2{0, 1}},   // Vertex 103
-
-        };
-
     BufferDesc VertBuffDesc;
     VertBuffDesc.Name      = "Butterfly VB";
     VertBuffDesc.Usage     = USAGE_IMMUTABLE;
     VertBuffDesc.BindFlags = BIND_VERTEX_BUFFER;
-    VertBuffDesc.Size      = sizeof(ButterflyVerts);
+    VertBuffDesc.Size      = sizeof(Butterfly::ButterflyVerts);
     BufferData VBData;
-    VBData.pData    = ButterflyVerts;
-    VBData.DataSize = sizeof(ButterflyVerts);
+    VBData.pData    = Butterfly::ButterflyVerts;
+    VBData.DataSize = sizeof(Butterfly::ButterflyVerts);
     m_pDevice->CreateBuffer(VertBuffDesc, &VBData, &m_ButterflyVertexBuffer);
 }
 
 void Tutorial03_Texturing::CreateIndexBuffer()
 {
-    constexpr Uint32 Indices[] =
-    {
-        // Wing left upper
-        1,0,2, 2,0,3,
-        3,0,4, 4,0,5,
-        5,0,6, 6,0,7,
-        7,0,8, 8,0,9,
-        9,0,10, 10,0,11,
-        11,0,12, 12,0,13,
-        13,0,14, 14,0,15,
-        15,0,16, 16,0,1,
-
-        // Wing left down
-        18,17,19, 19,17,20,
-        20,17,21, 21,17,22,
-        22,17,23, 23,17,24,
-        24,17,25, 25,17,26,
-        26,17,27, 27,17,28,
-        28,17,29, 29,17,30,
-        30,17,31, 31,17,32,
-        32,17,33, 33,17,34,
-        34,17,35, 35,17,36,
-        36,17,18, 18,17,1,
-
-        // Antlers
-        38,37,39, 41,40,42,
-
-        // head
-        44,43,45, 46,43,47,
-        48,43,49, 50,43,44,
-        44,43,45, 46,43,47,
-        47,43,48, 49,43,50,
-        50,43,44, 44,43,45,
-        45,43,46, 47,43,48,
-
-        // Body
-        51,52,53, 53,52,54,
-        54,52,55, 55,54,56,
-        56,55,57, 57,56,58,
-        58,57,59, 59,58,60,
-        60,59,61, 61,60,62,
-
-        // Wing right upper
-        64,63,65, 65,63,66,
-        66,63,67, 67,63,68,
-        68,63,69, 69,63,70,
-        70,63,71, 71,63,72,
-        72,63,73, 73,63,74,
-        74,63,75, 75,63,76,
-        76,63,77, 77,63,78,
-        78,63,79, 79,63,80,
-        80,63,81, 81,63,64,
-
-        // Wing right down
-        83,82,84, 84,82,85,
-        85,82,86, 86,82,87,
-        87,82,88, 88,82,89,
-        89,82,90, 90,82,91,
-        91,82,92, 92,82,93,
-        93,82,94, 94,82,95,
-        95,82,96, 96,82,97,
-        97,82,98, 98,82,99,
-        99,82,100, 100,82,101,
-        101,82,102, 102,82,83,
-        
-    };
-
     BufferDesc IndBuffDesc;
     IndBuffDesc.Name      = "Butterfly VI";
     IndBuffDesc.Usage     = USAGE_IMMUTABLE;
     IndBuffDesc.BindFlags = BIND_INDEX_BUFFER;
-    IndBuffDesc.Size      = sizeof(Indices);
+    IndBuffDesc.Size      = sizeof(Butterfly::ButterflyIndices);
     BufferData IBData;
-    IBData.pData    = Indices;
-    IBData.DataSize = sizeof(Indices);
+    IBData.pData    = Butterfly::ButterflyIndices;
+    IBData.DataSize = sizeof(Butterfly::ButterflyIndices);
     m_pDevice->CreateBuffer(IndBuffDesc, &IBData, &m_ButterflyIndexBuffer);
 }
 
@@ -398,7 +286,7 @@ void Tutorial03_Texturing::LoadTexture()
     TextureLoadInfo loadInfo;
     loadInfo.IsSRGB = true;
     RefCntAutoPtr<ITexture> Tex;
-    CreateTextureFromFile("DGLogo.png", loadInfo, m_pDevice, &Tex);
+    CreateTextureFromFile("try.png", loadInfo, m_pDevice, &Tex);
     // Get shader resource view from the texture
     m_TextureSRV = Tex->GetDefaultView(TEXTURE_VIEW_SHADER_RESOURCE);
 
@@ -411,10 +299,23 @@ void Tutorial03_Texturing::Initialize(const SampleInitInfo& InitInfo)
 {
     SampleBase::Initialize(InitInfo);
 
+    const auto SCDesc = m_pSwapChain->GetDesc();
+
+    m_Camera.SetPos(float3{0.f, 0.f, -6.f});
+    m_Camera.SetRotation(0.f, 0.f);
+    m_Camera.SetMoveSpeed(4.f);
+    m_Camera.SetRotationSpeed(0.006f);
+    m_Camera.SetProjAttribs(0.1f, 100.f,
+                            static_cast<float>(SCDesc.Width) / SCDesc.Height,
+                            PI_F / 4,
+                            SCDesc.PreTransform,
+                            m_pDevice->GetDeviceInfo().IsGLDevice());
+
     CreatePipelineState();
     CreateVertexBuffer();
     CreateIndexBuffer();
     LoadTexture();
+    CreateSkySphere();
 }
 
 // Render a frame
@@ -422,60 +323,85 @@ void Tutorial03_Texturing::Render()
 {
     auto* pRTV = m_pSwapChain->GetCurrentBackBufferRTV();
     auto* pDSV = m_pSwapChain->GetDepthBufferDSV();
-    // Clear the back buffer
-    float4 ClearColor = {0.350f, 0.350f, 0.350f, 1.0f};
+
+    float4 ClearColor = {0.35f, 0.35f, 0.35f, 1.0f};
     if (m_ConvertPSOutputToGamma)
-    {
-        // If manual gamma correction is required, we need to clear the render target with sRGB color
         ClearColor = LinearToSRGB(ClearColor);
-    }
-    m_pImmediateContext->ClearRenderTarget(pRTV, ClearColor.Data(), RESOURCE_STATE_TRANSITION_MODE_TRANSITION);
-    m_pImmediateContext->ClearDepthStencil(pDSV, CLEAR_DEPTH_FLAG, 1.f, 0, RESOURCE_STATE_TRANSITION_MODE_TRANSITION);
+
+    m_pImmediateContext->ClearRenderTarget(
+        pRTV, ClearColor.Data(), RESOURCE_STATE_TRANSITION_MODE_TRANSITION);
+    m_pImmediateContext->ClearDepthStencil(
+        pDSV, CLEAR_DEPTH_FLAG, 1.f, 0, RESOURCE_STATE_TRANSITION_MODE_TRANSITION);
 
     {
-        // Map the buffer and write current world-view-projection matrix
-        MapHelper<float4x4> CBConstants(m_pImmediateContext, m_VSConstants, MAP_WRITE, MAP_FLAG_DISCARD);
-        *CBConstants = m_WorldViewProjMatrix;
+     
+        float4x4 ViewNoPos = m_Camera.GetViewMatrix();
+        ViewNoPos._41 = ViewNoPos._42 = ViewNoPos._43 = 0.0f;
+
+        const float4x4 InvRotProj =
+            (ViewNoPos * m_Camera.GetProjMatrix()).Inverse();
+
+        MapHelper<float4x4> CB(m_pImmediateContext, m_SkyCB,
+                               MAP_WRITE, MAP_FLAG_DISCARD);
+        *CB = InvRotProj; 
+
+        m_pImmediateContext->SetPipelineState(m_SkyPSO);
+        m_pImmediateContext->CommitShaderResources(
+            m_SkySRB, RESOURCE_STATE_TRANSITION_MODE_TRANSITION);
+
+        DrawAttribs DA;
+        DA.NumVertices = 3;
+        DA.Flags       = DRAW_FLAG_VERIFY_ALL;
+        m_pImmediateContext->Draw(DA);
     }
 
-    // Bind vertex and index buffers
-    const Uint64 offset   = 0;
-    IBuffer*     pBuffs[] = {m_ButterflyVertexBuffer};
-    m_pImmediateContext->SetVertexBuffers(0, 1, pBuffs, &offset, RESOURCE_STATE_TRANSITION_MODE_TRANSITION, SET_VERTEX_BUFFERS_FLAG_RESET);
-    m_pImmediateContext->SetIndexBuffer(m_ButterflyIndexBuffer, 0, RESOURCE_STATE_TRANSITION_MODE_TRANSITION);
+    {
+        // Update VS constants (row‑major)
+        MapHelper<float4x4> CB(m_pImmediateContext, m_VSConstants,
+                               MAP_WRITE, MAP_FLAG_DISCARD);
+        *CB = m_WorldViewProj;
 
-    // Set the pipeline state
-    m_pImmediateContext->SetPipelineState(m_pPSO);
-    // Commit shader resources. RESOURCE_STATE_TRANSITION_MODE_TRANSITION mode
-    // makes sure that resources are transitioned to required states.
-    m_pImmediateContext->CommitShaderResources(m_SRB, RESOURCE_STATE_TRANSITION_MODE_TRANSITION);
+        // Bind VB / IB
+        const Uint64 offsets[] = {0};
+        IBuffer*     vbs[]     = {m_ButterflyVertexBuffer};
+        m_pImmediateContext->SetVertexBuffers(
+            0, 1, vbs, offsets, RESOURCE_STATE_TRANSITION_MODE_TRANSITION,
+            SET_VERTEX_BUFFERS_FLAG_RESET);
+        m_pImmediateContext->SetIndexBuffer(
+            m_ButterflyIndexBuffer, 0, RESOURCE_STATE_TRANSITION_MODE_TRANSITION);
 
-    DrawIndexedAttribs DrawAttrs;     // This is an indexed draw call
-    DrawAttrs.IndexType  = VT_UINT32; // Index type
-    DrawAttrs.NumIndices = 10000;
-    // Verify the state of vertex and index buffers
-    DrawAttrs.Flags = DRAW_FLAG_VERIFY_ALL;
-    m_pImmediateContext->DrawIndexed(DrawAttrs);
+        // PSO & SRB
+        m_pImmediateContext->SetPipelineState(m_pPSO);
+        m_pImmediateContext->CommitShaderResources(
+            m_SRB, RESOURCE_STATE_TRANSITION_MODE_TRANSITION);
+
+        DrawIndexedAttribs Draw;
+        Draw.IndexType  = VT_UINT32;
+        Draw.NumIndices = Butterfly::ButterflyIndexCount;
+        Draw.Flags      = DRAW_FLAG_VERIFY_ALL;
+        m_pImmediateContext->DrawIndexed(Draw);
+    }
 }
 
 void Tutorial03_Texturing::Update(double CurrTime, double ElapsedTime)
 {
     SampleBase::Update(CurrTime, ElapsedTime);
+     // 1) Advance camera from keyboard / mouse
+    m_Camera.Update(m_InputController, static_cast<float>(ElapsedTime));
+     // 2) Build final WVP matrix
+    const auto SurfT = GetSurfacePretransformMatrix(float3{0, 0, 1});
+    m_WorldViewProj    = m_Camera.GetViewMatrix() * SurfT * m_Camera.GetProjMatrix();
+}
 
-    // Apply rotation
-    float4x4 CubeModelTransform = float4x4::RotationY(static_cast<float>(CurrTime) * 1.0f) * float4x4::RotationX(-PI_F * 0.1f);
+void Tutorial03_Texturing::WindowResize(Uint32 W, Uint32 H)
+{
+    SampleBase::WindowResize(W, H);
 
-    // Camera is at (0, 0, -5) looking along the Z axis
-    float4x4 View = float4x4::RotationZ(PI_F) * float4x4::Translation(10.f, 6.0f, 20.0f);
-
-    // Get pretransform matrix that rotates the scene according the surface orientation
-    auto SrfPreTransform = GetSurfacePretransformMatrix(float3{0, 0, 1});
-
-    // Get projection matrix adjusted to the current screen orientation
-    auto Proj = GetAdjustedProjectionMatrix(PI_F / 4.0f, 0.1f, 100.f);
-
-    // Compute world-view-projection matrix
-    m_WorldViewProjMatrix =  View * SrfPreTransform * Proj;
+    m_Camera.SetProjAttribs(0.1f, 100.f,
+                            static_cast<float>(W) / H,
+                            PI_F / 4,
+                            m_pSwapChain->GetDesc().PreTransform,
+                            m_pDevice->GetDeviceInfo().IsGLDevice());
 }
 
 } // namespace Diligent

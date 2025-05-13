@@ -29,6 +29,7 @@
 
 #include "SampleBase.hpp"
 #include "BasicMath.hpp"
+#include "FirstPersonCamera.hpp" 
 
 namespace Diligent
 {
@@ -43,11 +44,15 @@ public:
 
     virtual const Char* GetSampleName() const override final { return "Tutorial03: Texturing"; }
 
+    virtual void WindowResize(Uint32 Width, Uint32 Height) override;
+
+
 private:
     void CreatePipelineState();
     void CreateVertexBuffer();
     void CreateIndexBuffer();
     void LoadTexture();
+    void CreateSkySphere();
 
     RefCntAutoPtr<IPipelineState>         m_pPSO;
     RefCntAutoPtr<IBuffer>                m_ButterflyVertexBuffer;
@@ -55,7 +60,15 @@ private:
     RefCntAutoPtr<IBuffer>                m_VSConstants;
     RefCntAutoPtr<ITextureView>           m_TextureSRV;
     RefCntAutoPtr<IShaderResourceBinding> m_SRB;
-    float4x4                              m_WorldViewProjMatrix;
+
+    // --- PNG + depth grid -----------------------------------------------
+    RefCntAutoPtr<IPipelineState>         m_SkyPSO;
+    RefCntAutoPtr<IShaderResourceBinding> m_SkySRB;
+    RefCntAutoPtr<IBuffer>                m_SkyCB;
+    RefCntAutoPtr<ITextureView>           m_SkySRV;
+
+    FirstPersonCamera m_Camera;  
+    float4x4          m_WorldViewProj;
 };
 
 } // namespace Diligent
