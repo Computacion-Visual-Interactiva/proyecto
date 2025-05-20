@@ -33,6 +33,7 @@
 #include "GraphicsUtilities.h"
 #include "TextureUtilities.h"
 #include "ColorConversion.h"
+#include "BasicMath.hpp"
 
 namespace Diligent
 {
@@ -104,7 +105,7 @@ void Tutorial03_Texturing::CreatePipelineState()
         // Dynamic buffers can be frequently updated by the CPU
         BufferDesc CBDesc;
         CBDesc.Name           = "VS constants";
-        CBDesc.Size           = sizeof(float4x4);
+        CBDesc.Size           = sizeof(VSConstants);
         CBDesc.Usage          = USAGE_DYNAMIC;
         CBDesc.BindFlags      = BIND_UNIFORM_BUFFER;
         CBDesc.CPUAccessFlags = CPU_ACCESS_WRITE;
@@ -126,9 +127,11 @@ void Tutorial03_Texturing::CreatePipelineState()
     LayoutElement LayoutElems[] =
     {
         // Attribute 0 - vertex position
-        LayoutElement{0, 0, 3, VT_FLOAT32, False},
+        {0, 0, 3, VT_FLOAT32, False},
         // Attribute 1 - texture coordinates
-        LayoutElement{1, 0, 2, VT_FLOAT32, False}
+        {1, 0, 2, VT_FLOAT32, False},
+        // Attribute 2 - Wing flag (-1/0/+1)
+        {2, 0, 1, VT_FLOAT32, False}
     };
     // clang-format on
 
@@ -301,7 +304,7 @@ void Tutorial03_Texturing::Initialize(const SampleInitInfo& InitInfo)
 
     const auto SCDesc = m_pSwapChain->GetDesc();
 
-    m_Camera.SetPos(float3{0.f, 0.f, -6.f});
+    m_Camera.SetPos(float3{0.f, 0.f, -18.f});
     m_Camera.SetRotation(0.f, 0.f);
     m_Camera.SetMoveSpeed(4.f);
     m_Camera.SetRotationSpeed(0.006f);
@@ -357,9 +360,10 @@ void Tutorial03_Texturing::Render()
 
     {
         // Update VS constants (row‑major)
-        MapHelper<float4x4> CB(m_pImmediateContext, m_VSConstants,
+        MapHelper<VSConstants> CB(m_pImmediateContext, m_VSConstants,
                                MAP_WRITE, MAP_FLAG_DISCARD);
-        *CB = m_WorldViewProj;
+        CB->WorldViewProj = m_WorldViewProj;
+        CB->WingAngle     = std::sin(m_PathTime * 2.0f * PI_F * kWingFactor) * kWingAmp;
 
         // Bind VB / IB
         const Uint64 offsets[] = {0};
@@ -383,15 +387,51 @@ void Tutorial03_Texturing::Render()
     }
 }
 
+float4x4 Tutorial03_Texturing::MakeWorld(const float3& Pos,
+                          const float3& Forward,
+                          const float3& Up)
+{
+    float3 Z = normalize(-Forward);
+    float3 X = normalize(cross(Up, Z));
+    float3 Y = cross(Z, X);
+    return float4x4(X.x, Y.x, Z.x, 0.0f,
+                    X.y, Y.y, Z.y, 0.0f,
+                    X.z, Y.z, Z.z, 0.0f,
+                    Pos.x, Pos.y, Pos.z, 1.0f);
+}
+
+
 void Tutorial03_Texturing::Update(double CurrTime, double ElapsedTime)
 {
     SampleBase::Update(CurrTime, ElapsedTime);
-     // 1) Advance camera from keyboard / mouse
+
     m_Camera.Update(m_InputController, static_cast<float>(ElapsedTime));
-     // 2) Build final WVP matrix
+    m_PathTime += static_cast<float>(ElapsedTime);
+
+    float theta = m_PathTime * kSpeed;
+    float x     = kRadius * std::cos(theta);
+    float z     = kRadius * std::sin(theta);
+
+    float phase = m_PathTime * kBobFreq * 2.0f * PI_F;
+    float y     = kBaseHeight +
+        kBobAmp * (0.6f * std::sin(phase) + 0.4f * std::sin(phase * 2.3f));
+
+    float3 forward = normalize(float3{
+        -kRadius * std::sin(theta),
+        0.0f,
+        kRadius * std::cos(theta)});
+
+    float4x4 World = MakeWorld(float3{x, y, z},
+                               forward,
+                               float3{0, 1, 0});
+
     const auto SurfT = GetSurfacePretransformMatrix(float3{0, 0, 1});
-    m_WorldViewProj    = m_Camera.GetViewMatrix() * SurfT * m_Camera.GetProjMatrix();
+    m_WorldViewProj  = World *
+        m_Camera.GetViewMatrix() *
+        SurfT *
+        m_Camera.GetProjMatrix();
 }
+
 
 void Tutorial03_Texturing::WindowResize(Uint32 W, Uint32 H)
 {

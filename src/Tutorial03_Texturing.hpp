@@ -1,4 +1,4 @@
-/*
+﻿/*
  *  Copyright 2019-2022 Diligent Graphics LLC
  *  Copyright 2015-2019 Egor Yusov
  *
@@ -46,6 +46,7 @@ public:
 
     virtual void WindowResize(Uint32 Width, Uint32 Height) override;
 
+    virtual float4x4 MakeWorld(const float3& Pos, const float3& Forward, const float3& Up);
 
 private:
     void CreatePipelineState();
@@ -61,7 +62,7 @@ private:
     RefCntAutoPtr<ITextureView>           m_TextureSRV;
     RefCntAutoPtr<IShaderResourceBinding> m_SRB;
 
-    // --- PNG�+�depth grid -----------------------------------------------
+    // --- PNG + depth grid -----------------------------------------------
     RefCntAutoPtr<IPipelineState>         m_SkyPSO;
     RefCntAutoPtr<IShaderResourceBinding> m_SkySRB;
     RefCntAutoPtr<IBuffer>                m_SkyCB;
@@ -69,6 +70,26 @@ private:
 
     FirstPersonCamera m_Camera;  
     float4x4          m_WorldViewProj;
+
+    float                  m_PathTime  = 0.0f; // accumulated time
+    static constexpr float kRadius     = 6.0f; // circle radius 
+    static constexpr float kSpeed      = 0.5f; // radians·s-¹
+    static constexpr float kBaseHeight = 0.0f; // centre of vertical motion
+    static constexpr float kBobAmp     = 0.25f; // vertical amplitude
+    static constexpr float kBobFreq    = 0.80f; // Hz
+
+
+    static constexpr float kWingFactor = 6.0f; // flaps per bob
+    static constexpr float kWingAmp    = 0.60f; // radians
+
+
+    struct VSConstants
+    {
+        float4x4 WorldViewProj;
+        float    WingAngle;
+        float3   _Padding;
+    };
+    static_assert(sizeof(VSConstants) % 16 == 0, "CB size must be 16-byte aligned");
 };
 
 } // namespace Diligent
