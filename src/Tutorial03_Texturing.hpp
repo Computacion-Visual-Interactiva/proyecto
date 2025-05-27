@@ -29,7 +29,7 @@
 
 #include "SampleBase.hpp"
 #include "BasicMath.hpp"
-#include "FirstPersonCamera.hpp" 
+#include "FirstPersonCamera.hpp"
 
 namespace Diligent
 {
@@ -54,6 +54,9 @@ private:
     void CreateIndexBuffer();
     void LoadTexture();
     void CreateSkySphere();
+    void GenerateInstanceData(float Time);
+    void DrawButterflies();
+    void InitInstanceData();
 
     RefCntAutoPtr<IPipelineState>         m_pPSO;
     RefCntAutoPtr<IBuffer>                m_ButterflyVertexBuffer;
@@ -68,19 +71,23 @@ private:
     RefCntAutoPtr<IBuffer>                m_SkyCB;
     RefCntAutoPtr<ITextureView>           m_SkySRV;
 
-    FirstPersonCamera m_Camera;  
+    FirstPersonCamera m_Camera;
     float4x4          m_WorldViewProj;
 
-    float                  m_PathTime  = 0.0f; // accumulated time
-    static constexpr float kRadius     = 6.0f; // circle radius 
-    static constexpr float kSpeed      = 0.5f; // radians·s-¹
-    static constexpr float kBaseHeight = 0.0f; // centre of vertical motion
+    float                  m_PathTime  = 0.0f;  // accumulated time
+    static constexpr float kRadius     = 6.0f;  // circle radius
+    static constexpr float kSpeed      = 0.75f;  // radians·s-¹
+    static constexpr float kBaseHeight = 0.0f;  // centre of vertical motion
     static constexpr float kBobAmp     = 0.25f; // vertical amplitude
     static constexpr float kBobFreq    = 0.80f; // Hz
 
-
-    static constexpr float kWingFactor = 6.0f; // flaps per bob
+    static constexpr float kWingFactor = 6.0f;  // flaps per bob
     static constexpr float kWingAmp    = 0.60f; // radians
+
+    std::vector<float4x4> m_InstanceWorlds;
+    Uint32                m_InstanceCount = 50;
+    std::vector<float3>   m_InstanceCenters;
+    std::vector<float>    m_InstancePhases;
 
 
     struct VSConstants
